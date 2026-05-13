@@ -1,0 +1,13 @@
+[package]
+name = "vulnerable-app"
+version = "0.1.0"
+edition = "2021"
+description = "Deliberately broken fixture for testing ai-bug-scanner. DO NOT USE."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+rusqlite = "0.31"
+md-5 = "0.10"
+rand = "0.8"

@@ -1,0 +1,7 @@
+[package]
+name = "safe-app"
+version = "0.1.0"
+edition = "2021"
+description = "Clean fixture for testing ai-bug-scanner's false-positive rate."
+
+[dependencies]

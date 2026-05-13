@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+coverage/
+*.html
+# Default scan report files are named <project>-<provider>-<model>.json in cwd.
+# Tracking them by hand here is brittle; ignore the canonical extension only if
+# you keep scans in a dedicated dir (e.g. reports/*.json). Add your own pattern.
