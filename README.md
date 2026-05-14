@@ -1,4 +1,4 @@
-# AI Bug Scanner
+# Cyber Golden Pupil
 
 CLI for AI-assisted security scanning of Rust projects. See [`intro.md`](./intro.md) for the project vision and [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the design.
 
