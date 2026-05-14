@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import dotenv from "dotenv";
 import { scan } from "./commands/scan.js";
+import { evaluate } from "./commands/evaluate.js";
 import { listProviders } from "./config/index.js";
 
 dotenv.config();
@@ -61,6 +62,27 @@ program
   .option("--no-report", "do not write a report file")
   .option("--dry-run", "skip LLM calls; print prefilter results only", false)
   .action(scan);
+
+program
+  .command("evaluate")
+  .description("Score a scan report against a ground-truth YAML")
+  .argument("<report>", "scan report JSON (from `scan --report ...json` or `scan --output json`)")
+  .requiredOption(
+    "-g, --ground-truth <path>",
+    "path to ground-truth.yaml describing expected findings",
+  )
+  .option("-o, --output <format>", "text | json", "text")
+  .option(
+    "--min-recall <n>",
+    "exit non-zero unless recall >= n (0..1)",
+    (v) => parseFloat(v),
+  )
+  .option(
+    "--min-precision <n>",
+    "exit non-zero unless precision >= n (0..1)",
+    (v) => parseFloat(v),
+  )
+  .action(evaluate);
 
 program.parseAsync(process.argv).catch((err) => {
   process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);

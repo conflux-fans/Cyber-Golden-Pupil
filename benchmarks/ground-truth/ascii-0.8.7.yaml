@@ -1,0 +1,67 @@
+# Ground truth for ascii 0.8.7
+# CVE: RUSTSEC-2023-0015 / GHSA-mrrw-grhq-86gf
+# Bug: `impl_into!` produces `From<&mut AsciiStr>` for `&mut [u8]` and
+# `&mut str`. Safe code can take a &mut AsciiStr, convert to &mut [u8],
+# write arbitrary bytes (including non-ASCII / non-UTF8), then read the
+# original AsciiStr as &str — invalid UTF-8 in a &str is immediate UB.
+# Fixed in: 0.9.3 by removing the &mut impls.
+
+target: ascii-0.8.7
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings:
+  - id: ascii-mut-coerce-macro
+    file: src/ascii_str.rs
+    line_start: 341
+    line_end: 347
+    category: unsound-trait-impl
+    cwe: CWE-125
+    severity: high
+    must_detect: true
+    aliases:
+      - unsound
+      - undefined-behavior
+      - unsafe
+      - type-confusion
+      - invalid-utf8
+    notes: |
+      `impl<'a> From<&'a mut AsciiStr> for &'a mut $wider` lets safe code
+      reinterpret a mutable AsciiStr as &mut [u8] (or &mut str), break the
+      ASCII invariant, then read it back through the original alias.
+
+  - id: ascii-mut-coerce-invocation-u8
+    file: src/ascii_str.rs
+    line_start: 359
+    line_end: 359
+    category: unsound-trait-impl
+    cwe: CWE-125
+    severity: high
+    must_detect: false
+    aliases:
+      - unsound
+      - undefined-behavior
+    notes: |
+      Bonus — `impl_into!{[u8]}` instantiates the unsound From for
+      `&mut [u8]`. A scanner that flags either the macro body or the
+      invocation hits the bug; we expose this as bonus so we don't
+      double-count.
+
+  - id: ascii-mut-coerce-invocation-str
+    file: src/ascii_str.rs
+    line_start: 360
+    line_end: 360
+    category: unsound-trait-impl
+    cwe: CWE-125
+    severity: high
+    must_detect: false
+    aliases:
+      - unsound
+      - undefined-behavior
+    notes: |
+      Bonus — `impl_into!{str}` is the most dangerous variant (invalid
+      UTF-8 in &str is UB even without further dereference). Same
+      bonus-credit logic as above.

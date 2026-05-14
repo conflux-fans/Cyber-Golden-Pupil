@@ -1,0 +1,39 @@
+# Ground truth for borsh 0.10.3
+# CVE: RUSTSEC-2023-0033 / GHSA-fjx5-qpf4-xjf2
+# Bug: Vec<T>::deserialize for ZST T constructs ONE T and then claims via
+# `Vec::from_raw_parts(p, len, len)` that there are `len` of them. For
+# non-Copy/Clone ZSTs (e.g. wrappers around a singleton), iterating /
+# dropping the vec touches `len` "instances" that were never constructed
+# and runs Drop more than once.
+# Fixed in: 0.10.4 / 1.0.0-alpha.1
+
+target: borsh-0.10.3
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings:
+  - id: borsh-zst-deser-fake-clones
+    file: src/de/mod.rs
+    line_start: 385
+    line_end: 394
+    category: insecure-deserialization
+    cwe: CWE-502
+    severity: high
+    must_detect: true
+    aliases:
+      - unsafe
+      - unsound
+      - undefined-behavior
+      - untrusted-deserialization
+      - memory-corruption
+      - from-raw-parts-misuse
+    notes: |
+      The ZST branch in `BorshDeserialize for Vec<T>` constructs exactly one
+      element, forgets ownership, then calls
+      `Vec::from_raw_parts(p, len, len)` with attacker-controlled `len`.
+      For non-Copy non-Clone ZSTs this yields a Vec whose elements share
+      no provenance with anything ever constructed — touching them or
+      dropping the Vec is UB.

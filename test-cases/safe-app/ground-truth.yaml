@@ -1,0 +1,18 @@
+# Ground truth for the `safe-app` fixture.
+#
+# This crate is the negative control: it is intended to be clean, so the
+# expected `findings[]` list is empty. Anything the scanner reports here
+# is a false positive and counts against precision.
+#
+# If you intentionally add a "borderline" pattern to safe-app to probe the
+# scanner's threshold, add it here with `must_detect: false` so the
+# evaluator gives bonus credit but does not penalise omission.
+
+target: safe-app
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings: []

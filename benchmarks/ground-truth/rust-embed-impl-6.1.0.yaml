@@ -1,0 +1,52 @@
+# Ground truth for rust-embed-impl 6.1.0
+# CVE: RUSTSEC-2021-0126 / CVE-2021-45712 / GHSA-cgw6-f3mj-h742
+# Bug: The proc-macro's "dynamic" codegen (used in debug builds without the
+# debug-embed feature) joins the user-supplied file_path onto the embed
+# folder and reads it from disk without canonicalising and verifying the
+# result is a child of the folder. `../../../etc/passwd` escapes the root.
+# Fixed in: rust-embed-impl >= 6.2.0 added canonicalize + starts_with check.
+
+target: rust-embed-impl-6.1.0
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings:
+  - id: rust-embed-debug-get-no-canonicalize
+    file: src/lib.rs
+    line_start: 104
+    line_end: 119
+    category: path-traversal
+    cwe: CWE-22
+    severity: high
+    must_detect: true
+    aliases:
+      - directory-traversal
+      - file-disclosure
+      - tainted-path
+      - missing-input-validation
+    notes: |
+      The `quote!` block that generates the debug-mode `get(file_path)`
+      builds an on-disk path by `Path::new(folder).join(rel_file_path)`
+      and reads it with no canonicalize-and-prefix-check. A scanner that
+      understands proc-macro output may flag this; a scanner that only
+      reads the surface text needs to recognise the pattern inside a
+      quote!{} body, which is the hard mode for AI scanners.
+
+  - id: rust-embed-debug-iter-no-prefix-check
+    file: src/lib.rs
+    line_start: 121
+    line_end: 130
+    category: path-traversal
+    cwe: CWE-22
+    severity: low
+    must_detect: false
+    aliases:
+      - directory-traversal
+      - file-disclosure
+    notes: |
+      Bonus — the iter() generated path does not enforce a folder boundary
+      either, though it's less obviously exploitable (the iterator is
+      seeded from `get_files(folder)` directly, not from user input).

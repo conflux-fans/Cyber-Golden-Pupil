@@ -1,0 +1,38 @@
+# Ground truth for tower-http 0.2.0
+# CVE: RUSTSEC-2022-0043 / GHSA-qrqq-9c63-xfrg
+# Bug: `build_and_validate_path` rejects `..` and `\` in each segment but
+# does NOT detect Windows-style absolute components like `c:` (drive
+# letter + colon). On Windows, `PathBuf::push("c:")` replaces the base
+# path with the absolute drive root, so a request to
+# `/foo/bar/c:/windows/web/screen/img101.png` reads
+# `c:\windows\web\screen\img101.png`.
+# Fixed in: 0.2.1 / 0.1.3
+# Platform: Windows only — Unix is unaffected.
+
+target: tower-http-0.2.0
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings:
+  - id: tower-http-windows-drive-traversal
+    file: src/services/fs/serve_dir.rs
+    line_start: 132
+    line_end: 146
+    category: path-traversal
+    cwe: CWE-22
+    severity: high
+    must_detect: true
+    aliases:
+      - directory-traversal
+      - file-disclosure
+      - tainted-path
+      - missing-input-validation
+      - platform-specific
+    notes: |
+      Per-segment `starts_with("..")` and `contains('\\')` checks miss
+      Windows-style drive prefixes (`c:`). On Windows, `PathBuf::push`
+      treats a string with a drive prefix as absolute and replaces the
+      base, so the function returns a path outside the configured root.

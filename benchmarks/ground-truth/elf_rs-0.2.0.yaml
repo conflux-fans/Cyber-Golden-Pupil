@@ -1,0 +1,70 @@
+# Ground truth for elf_rs 0.2.0
+# CVE: RUSTSEC-2022-0079 / GHSA-g6pw-999w-j75m
+# Bug: ELF header parser uses attacker-controlled offsets in unchecked
+# unsafe pointer arithmetic, so a malformed input can construct a wild
+# pointer that points anywhere in the process address space.
+# Fixed in: 0.3.0
+
+target: elf_rs-0.2.0
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings:
+  - id: elf_rs-unchecked-elf-header-cast
+    file: src/elf/elf.rs
+    line_start: 61
+    line_end: 63
+    category: unsafe-memory
+    cwe: CWE-125
+    severity: high
+    must_detect: true
+    aliases:
+      - unsafe
+      - out-of-bounds-read
+      - unsafe-pointer-cast
+      - input-validation
+    notes: |
+      `elf_header_raw` casts the content pointer to `*const ET::ElfHeader`
+      without verifying the slice is at least `size_of::<ElfHeader>()` long.
+      Reads off the end of the buffer for truncated inputs.
+
+  - id: elf_rs-unchecked-program-header-offset
+    file: src/elf/elf.rs
+    line_start: 65
+    line_end: 72
+    category: unsafe-memory
+    cwe: CWE-125
+    severity: critical
+    must_detect: true
+    aliases:
+      - unsafe
+      - out-of-bounds-read
+      - unsafe-pointer-arithmetic
+      - input-validation
+      - tainted-input
+    notes: |
+      `program_header_offset` and `_entry_num` are attacker-controlled values
+      from the parsed ELF header. `content.as_ptr().add(ph_off)` and the
+      following `from_raw_parts(ph_ptr, ph_num)` construct a slice that may
+      point anywhere — no bounds check.
+
+  - id: elf_rs-unchecked-section-header-offset
+    file: src/elf/elf.rs
+    line_start: 84
+    line_end: 91
+    category: unsafe-memory
+    cwe: CWE-125
+    severity: critical
+    must_detect: true
+    aliases:
+      - unsafe
+      - out-of-bounds-read
+      - unsafe-pointer-arithmetic
+      - input-validation
+      - tainted-input
+    notes: |
+      Same pattern as program_header_raw. This is the function the advisory
+      quotes verbatim.

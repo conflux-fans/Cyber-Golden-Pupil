@@ -1,0 +1,65 @@
+# Ground truth for memoffset 0.6.1
+# CVE: RUSTSEC-2023-0045 / GHSA-wfg4-322g-9vqv
+# Bug: offset_of! macro reads from / creates references to uninitialized memory.
+# Fixed in: 0.6.2 (PR #50, switched to std::ptr::addr_of).
+
+target: memoffset-0.6.1
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings:
+  - id: memoffset-dangling-align-of-ptr
+    file: src/offset_of.rs
+    line_start: 40
+    line_end: 46
+    category: unsafe-memory
+    cwe: CWE-908
+    severity: high
+    must_detect: true
+    aliases:
+      - unsafe-pointer-arithmetic
+      - undefined-behavior
+      - dangling-pointer
+      - uninitialized-memory
+    notes: |
+      Non-MaybeUninit fallback for `_memoffset__let_base_ptr!` casts
+      `mem::align_of::<T>()` to `*const T`, producing a dangling pointer
+      that is later dereferenced via raw_field!. UB.
+
+  - id: memoffset-ref-to-uninit
+    file: src/raw_field.rs
+    line_start: 33
+    line_end: 39
+    category: unsafe-memory
+    cwe: CWE-908
+    severity: high
+    must_detect: true
+    aliases:
+      - undefined-behavior
+      - uninitialized-memory
+      - unsound
+    notes: |
+      Non-unstable_raw fallback for `_memoffset__raw_const!` takes
+      `&$path as *const _` where `$path` is a projection through a
+      pointer to possibly-uninitialized memory — creates an intermediate
+      reference to uninit, which is UB.
+
+  - id: memoffset-maybeuninit-as-ptr-deref
+    file: src/offset_of.rs
+    line_start: 26
+    line_end: 36
+    category: unsafe-memory
+    cwe: CWE-908
+    severity: medium
+    must_detect: false
+    aliases:
+      - undefined-behavior
+      - uninitialized-memory
+    notes: |
+      Bonus — even the MaybeUninit branch (used as the "safe" path)
+      relies on the field-projection `*ptr.field` not actually
+      dereferencing; downstream impls have to cooperate. PR #50 fixed
+      this by switching to `std::ptr::addr_of`.

@@ -1,0 +1,366 @@
+# Ground truth for the `vulnerable-app` fixture.
+#
+# Each `findings[]` entry is a bug we believe the scanner *should* detect.
+# The evaluator uses this file to compute recall (did we hit it?), precision
+# (did the scanner report things that are NOT in here?), and a severity
+# confusion matrix (did the scanner agree on how bad it is?).
+#
+# Matching rules:
+#   - file must match exactly
+#   - reported [line_start, line_end] must overlap the ground-truth range,
+#     extended by `match_policy.line_slack` lines on each side
+#   - category match is by `category` OR any string in `aliases`, case-insensitive
+#
+# Fields:
+#   id           stable identifier; never reuse after deletion
+#   file         path relative to this fixture's root
+#   line_start   first line of the buggy region (1-indexed, inclusive)
+#   line_end     last line of the buggy region (1-indexed, inclusive)
+#   category     canonical bug class (kebab-case)
+#   cwe          best-fit CWE identifier; informational only
+#   severity     expected severity: critical | high | medium | low | info
+#   must_detect  true = counts toward recall; false = bonus credit only
+#   aliases      additional rule_id / category strings that should still count
+#                as a hit (handles scanner-specific naming)
+#   notes        free-form rationale; kept short
+
+target: vulnerable-app
+schema_version: 1
+
+match_policy:
+  line_slack: 5
+  severity_order: [info, low, medium, high, critical]
+
+findings:
+  # --- src/db.rs --------------------------------------------------------------
+  - id: db-sqli-find-user-by-name
+    file: src/db.rs
+    line_start: 5
+    line_end: 8
+    category: sql-injection
+    cwe: CWE-89
+    severity: critical
+    must_detect: true
+    aliases: [sqli, tainted-sql, sql_injection]
+    notes: format!() builds query from caller-controlled `name`.
+
+  - id: db-sqli-delete-user
+    file: src/db.rs
+    line_start: 12
+    line_end: 15
+    category: sql-injection
+    cwe: CWE-89
+    severity: critical
+    must_detect: true
+    aliases: [sqli, sql_injection]
+    notes: same pattern in DELETE; also wraps in .unwrap().
+
+  - id: db-sqli-list-records-order-by
+    file: src/db.rs
+    line_start: 19
+    line_end: 24
+    category: sql-injection
+    cwe: CWE-89
+    severity: high
+    must_detect: true
+    aliases: [sqli, tainted-order-by]
+    notes: ORDER BY is not parameterizable; needs allow-list.
+
+  - id: db-unwrap-on-execute
+    file: src/db.rs
+    line_start: 14
+    line_end: 14
+    category: panic-unwrap
+    cwe: CWE-248
+    severity: low
+    must_detect: false
+    aliases: [unwrap, panic, unhandled-error]
+    notes: bonus — secondary to the SQLi on the same lines.
+
+  # --- src/exec.rs ------------------------------------------------------------
+  - id: exec-cmd-injection-ping
+    file: src/exec.rs
+    line_start: 5
+    line_end: 12
+    category: command-injection
+    cwe: CWE-78
+    severity: critical
+    must_detect: true
+    aliases: [cmdi, shell-injection, os-command-injection]
+    notes: sh -c with format!()'d user input.
+
+  - id: exec-arg-injection-tar
+    file: src/exec.rs
+    line_start: 16
+    line_end: 23
+    category: argument-injection
+    cwe: CWE-88
+    severity: high
+    must_detect: true
+    aliases: [command-injection, cmdi, arg-injection]
+    notes: split_whitespace lets caller smuggle extra tar flags.
+
+  - id: exec-cmd-injection-run-script
+    file: src/exec.rs
+    line_start: 27
+    line_end: 30
+    category: command-injection
+    cwe: CWE-78
+    severity: critical
+    must_detect: true
+    aliases: [cmdi, shell-injection]
+    notes: /bin/sh -c with raw user script.
+
+  # --- src/auth.rs ------------------------------------------------------------
+  - id: auth-hardcoded-secret
+    file: src/auth.rs
+    line_start: 5
+    line_end: 5
+    category: hardcoded-secret
+    cwe: CWE-798
+    severity: high
+    must_detect: true
+    aliases: [hardcoded-credential, secret-in-source]
+
+  - id: auth-weak-hash-md5
+    file: src/auth.rs
+    line_start: 10
+    line_end: 14
+    category: weak-crypto
+    cwe: CWE-327
+    severity: high
+    must_detect: true
+    aliases: [weak-hash, broken-hash, insecure-hash]
+    notes: MD5 + unsalted.
+
+  - id: auth-timing-attack-token-compare
+    file: src/auth.rs
+    line_start: 19
+    line_end: 21
+    category: timing-attack
+    cwe: CWE-208
+    severity: medium
+    must_detect: true
+    aliases: [non-constant-time-compare, timing-side-channel]
+
+  - id: auth-insecure-rng-session
+    file: src/auth.rs
+    line_start: 25
+    line_end: 27
+    category: insecure-randomness
+    cwe: CWE-338
+    severity: high
+    must_detect: true
+    aliases: [weak-random, predictable-rng, non-crypto-rng]
+    notes: rand::random uses non-CSPRNG; predictable session IDs.
+
+  - id: auth-secret-fallback
+    file: src/auth.rs
+    line_start: 32
+    line_end: 34
+    category: hardcoded-secret
+    cwe: CWE-798
+    severity: medium
+    must_detect: false
+    aliases: [insecure-default, hardcoded-credential]
+    notes: bonus — falls back to the hardcoded default.
+
+  # --- src/files.rs -----------------------------------------------------------
+  - id: files-path-traversal-read
+    file: src/files.rs
+    line_start: 7
+    line_end: 10
+    category: path-traversal
+    cwe: CWE-22
+    severity: high
+    must_detect: true
+    aliases: [directory-traversal, lfi]
+
+  - id: files-path-traversal-write
+    file: src/files.rs
+    line_start: 14
+    line_end: 17
+    category: path-traversal
+    cwe: CWE-22
+    severity: high
+    must_detect: true
+    aliases: [directory-traversal, arbitrary-file-write]
+
+  - id: files-toctou
+    file: src/files.rs
+    line_start: 21
+    line_end: 28
+    category: toctou
+    cwe: CWE-367
+    severity: medium
+    must_detect: true
+    aliases: [race-condition, time-of-check-time-of-use]
+
+  # --- src/ffi.rs -------------------------------------------------------------
+  - id: ffi-unbounded-strlen
+    file: src/ffi.rs
+    line_start: 9
+    line_end: 11
+    category: unsafe-ffi
+    cwe: CWE-125
+    severity: high
+    must_detect: true
+    aliases: [unsafe, out-of-bounds-read, ffi-pointer-misuse]
+
+  - id: ffi-transmute
+    file: src/ffi.rs
+    line_start: 16
+    line_end: 18
+    category: unsafe-transmute
+    cwe: CWE-704
+    severity: medium
+    must_detect: true
+    aliases: [unsafe, transmute, type-confusion]
+
+  - id: ffi-no-mangle-export
+    file: src/ffi.rs
+    line_start: 23
+    line_end: 31
+    category: unsafe-ffi
+    cwe: CWE-787
+    severity: high
+    must_detect: true
+    aliases: [unsafe, ffi-pointer-misuse, integer-truncation]
+    notes: also has `len as usize` truncation.
+
+  - id: ffi-box-from-raw-unknown
+    file: src/ffi.rs
+    line_start: 35
+    line_end: 37
+    category: unsafe-memory
+    cwe: CWE-590
+    severity: high
+    must_detect: true
+    aliases: [unsafe, invalid-free, use-after-free]
+
+  - id: ffi-dangling-slice
+    file: src/ffi.rs
+    line_start: 41
+    line_end: 45
+    category: use-after-free
+    cwe: CWE-416
+    severity: critical
+    must_detect: true
+    aliases: [unsafe, dangling-pointer, escaping-local-reference]
+
+  # --- src/parse.rs -----------------------------------------------------------
+  - id: parse-int-truncation-u64-i32
+    file: src/parse.rs
+    line_start: 3
+    line_end: 5
+    category: integer-truncation
+    cwe: CWE-197
+    severity: medium
+    must_detect: true
+    aliases: [lossy-cast, narrowing-cast, integer-overflow]
+
+  - id: parse-int-overflow-mul
+    file: src/parse.rs
+    line_start: 9
+    line_end: 11
+    category: integer-overflow
+    cwe: CWE-190
+    severity: medium
+    must_detect: true
+    aliases: [arithmetic-overflow, unchecked-arithmetic]
+
+  - id: parse-age-unwrap-and-truncate
+    file: src/parse.rs
+    line_start: 15
+    line_end: 17
+    category: integer-truncation
+    cwe: CWE-197
+    severity: medium
+    must_detect: true
+    aliases: [lossy-cast, panic-unwrap, narrowing-cast]
+
+  - id: parse-loop-counter-i32
+    file: src/parse.rs
+    line_start: 21
+    line_end: 27
+    category: integer-overflow
+    cwe: CWE-190
+    severity: low
+    must_detect: false
+    aliases: [arithmetic-overflow, unchecked-arithmetic]
+    notes: bonus — only triggers at >2B elements.
+
+  - id: parse-div-by-zero
+    file: src/parse.rs
+    line_start: 31
+    line_end: 33
+    category: division-by-zero
+    cwe: CWE-369
+    severity: medium
+    must_detect: true
+    aliases: [panic, divide-by-zero, dos]
+
+  # --- src/concurrency.rs -----------------------------------------------------
+  - id: concurrency-lock-order-inversion
+    file: src/concurrency.rs
+    line_start: 10
+    line_end: 29
+    category: deadlock
+    cwe: CWE-833
+    severity: high
+    must_detect: true
+    aliases: [lock-order-inversion, lock-ordering]
+    notes: forward() vs backward() take a/b in opposite order.
+
+  - id: concurrency-non-atomic-snapshot
+    file: src/concurrency.rs
+    line_start: 34
+    line_end: 38
+    category: race-condition
+    cwe: CWE-362
+    severity: medium
+    must_detect: true
+    aliases: [data-race, non-atomic-read, torn-read]
+
+  - id: concurrency-mutex-expect-poison
+    file: src/concurrency.rs
+    line_start: 44
+    line_end: 47
+    category: panic-unwrap
+    cwe: CWE-248
+    severity: low
+    must_detect: false
+    aliases: [unwrap, expect, mutex-poison]
+    notes: bonus — expect() on lock().
+
+  # --- src/deser.rs -----------------------------------------------------------
+  - id: deser-untrusted-json-config
+    file: src/deser.rs
+    line_start: 13
+    line_end: 15
+    category: insecure-deserialization
+    cwe: CWE-502
+    severity: high
+    must_detect: true
+    aliases: [unsafe-deserialization, untrusted-input, privilege-escalation]
+    notes: admin:true in payload escalates privileges.
+
+  - id: deser-bincode-untrusted
+    file: src/deser.rs
+    line_start: 20
+    line_end: 22
+    category: insecure-deserialization
+    cwe: CWE-502
+    severity: high
+    must_detect: true
+    aliases: [unsafe-deserialization, untrusted-input]
+
+  - id: deser-unbounded-body
+    file: src/deser.rs
+    line_start: 26
+    line_end: 28
+    category: resource-exhaustion
+    cwe: CWE-770
+    severity: medium
+    must_detect: true
+    aliases: [dos, unbounded-allocation, missing-size-limit]

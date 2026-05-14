@@ -4,6 +4,10 @@
 
 本工具也可以理解为一个 AI 代码审查 Agent.
 
+## 大模型扫描 bug 的优势
+
+https://claude.ai/share/bd55671e-26bb-40cc-8fd2-ef2a0d0b6285
+
 ## 功能概述
 
 1. 这是一个 CLI 工具, 可以通过命令行界面来使用, 整体使用 typescript 编写, 通过 node 来运行.
@@ -34,3 +38,4 @@
    2. https://claude.com/product/claude-security
    3. https://claude.com/solutions/security
 2. [OpenAI DayBreak](https://openai.com/daybreak/)
+   1. https://developers.openai.com/codex/security

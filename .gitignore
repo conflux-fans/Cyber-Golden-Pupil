@@ -6,6 +6,12 @@ dist/
 .DS_Store
 coverage/
 *.html
+
+# External benchmarks: cloned advisory-db + downloaded crate sources.
+# The README is the only thing we keep in git.
+benchmarks/advisory-db/
+benchmarks/cves/
+
 # Default scan report files are named <project>-<provider>-<model>.json in cwd.
 # Tracking them by hand here is brittle; ignore the canonical extension only if
 # you keep scans in a dedicated dir (e.g. reports/*.json). Add your own pattern.
