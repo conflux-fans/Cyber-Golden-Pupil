@@ -11,6 +11,7 @@ coverage/
 # The README is the only thing we keep in git.
 benchmarks/advisory-db/
 benchmarks/cves/
+.ai-bug-scanner-cache
 
 # Default scan report files are named <project>-<provider>-<model>.json in cwd.
 # Tracking them by hand here is brittle; ignore the canonical extension only if
