@@ -31,6 +31,13 @@ https://claude.ai/share/bd55671e-26bb-40cc-8fd2-ef2a0d0b6285
 
 1. https://api.moonshot.cn/v1
 
+## 待办列表
+
+1. 开发 web 平台，通过网页访问，而不仅仅是命令行。
+2. 断点续扫：以 chunk 内容哈希 + provider/model/prompt 版本为 key 的本地缓存，扫描中断后重启可跳过已完成的 chunk；judge 阶段同理。
+3. 支持 Solidity 语言。
+4. 并发扫描：同时扫描多个文件，提升扫描效率。
+
 ## 相关产品
 
 1. [Claude Security](https://claude.com/blog/claude-security-public-beta) 

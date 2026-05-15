@@ -12,6 +12,7 @@ import { renderJson } from "../reporter/json.js";
 import { buildReport, countLines, defaultReportFilename } from "../reporter/report.js";
 import { renderHtmlReport } from "../reporter/html.js";
 import { createClient } from "../providers/factory.js";
+import { ScanCache, type ScanCacheKey } from "../analyzer/cache.js";
 
 interface ScanOptions {
   provider: string;
@@ -24,6 +25,9 @@ interface ScanOptions {
   crate: string[];
   unit: ChunkingUnit;
   report?: string | false;
+  cacheDir: string;
+  /** Commander's `--no-resume` produces `resume: false`; default is `true`. */
+  resume: boolean;
 }
 
 export async function scan(dir: string, opts: ScanOptions): Promise<void> {
@@ -95,26 +99,64 @@ export async function scan(dir: string, opts: ScanOptions): Promise<void> {
 
   const cfg = loadConfig(opts.provider);
   const label = `${cfg.providerName}/${cfg.model}`;
+
+  let cache: ScanCache | undefined;
+  if (opts.resume) {
+    const cacheKey: ScanCacheKey = {
+      projectPath: project.rootDir,
+      provider: cfg.providerName,
+      model: cfg.model,
+      unit: opts.unit,
+      judge: opts.judge,
+      crates: crates.map((c) => c.name),
+    };
+    const cachePath = ScanCache.computePath(opts.cacheDir, project.projectName, cacheKey);
+    cache = new ScanCache(cachePath);
+    spin.start("Loading scan cache...");
+    const hits = await cache.load();
+    await cache.openForWrite(cacheKey);
+    if (hits.chunkHits + hits.judgeHits > 0) {
+      spin.succeed(
+        `Resuming from cache ${chalk.cyan(cachePath)}: ` +
+          `${chalk.cyan(hits.chunkHits)} chunk result(s), ` +
+          `${chalk.cyan(hits.judgeHits)} judgement(s) cached`,
+      );
+    } else {
+      spin.succeed(`Cache initialized at ${chalk.cyan(cachePath)}`);
+    }
+  }
+
   spin.start(formatProgress(label, 0, chunks.length));
   const client = createClient(cfg);
-  const { findings, stats } = await analyze(chunks, client, {
-    concurrency: opts.concurrency,
-    maxRetries: opts.maxRetries,
-    judge: opts.judge,
-    onProgress: (done, total) => {
-      spin.text = formatProgress(label, done, total);
-    },
-    onJudgeStart: (n) => {
-      spin.text = `Judging ${chalk.cyan(n)} critical finding(s) with ${label}...`;
-    },
-    onJudgeProgress: (done, total) => {
-      spin.text = formatJudgeProgress(label, done, total);
-    },
-  });
+  let findings: Awaited<ReturnType<typeof analyze>>["findings"];
+  let stats: Awaited<ReturnType<typeof analyze>>["stats"];
+  try {
+    ({ findings, stats } = await analyze(chunks, client, {
+      concurrency: opts.concurrency,
+      maxRetries: opts.maxRetries,
+      judge: opts.judge,
+      cache,
+      onProgress: (done, total) => {
+        spin.text = formatProgress(label, done, total);
+      },
+      onJudgeStart: (n) => {
+        spin.text = `Judging ${chalk.cyan(n)} critical finding(s) with ${label}...`;
+      },
+      onJudgeProgress: (done, total) => {
+        spin.text = formatJudgeProgress(label, done, total);
+      },
+    }));
+  } finally {
+    await cache?.close();
+  }
+  const cacheNote =
+    cache && stats.chunkCacheHits + stats.judgeCacheHits > 0
+      ? ` [cached: ${stats.chunkCacheHits} chunk + ${stats.judgeCacheHits} judge]`
+      : "";
   spin.succeed(
     `Analysis complete. ${chalk.cyan(findings.length)} finding(s). ` +
       `Tokens: ${chalk.cyan(stats.inputTokens)} in / ${chalk.cyan(stats.outputTokens)} out ` +
-      `(${stats.analyzeCalls} analyze + ${stats.judgeCalls} judge call(s)).`,
+      `(${stats.analyzeCalls} analyze + ${stats.judgeCalls} judge call(s))${cacheNote}.`,
   );
 
   if (opts.output === "json") process.stdout.write(renderJson(findings) + "\n");

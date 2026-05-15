@@ -78,7 +78,14 @@ test("buildReport: produces valid JSON with all expected sections", () => {
       protocol: "openai",
     },
     config: { unit: "ast-function", concurrency: 4, maxRetries: 5, judge: true },
-    stats: { inputTokens: 100, outputTokens: 50, analyzeCalls: 2, judgeCalls: 1 },
+    stats: {
+      inputTokens: 100,
+      outputTokens: 50,
+      analyzeCalls: 2,
+      judgeCalls: 1,
+      chunkCacheHits: 0,
+      judgeCacheHits: 0,
+    },
     findings: [finding],
   });
   const obj = JSON.parse(body);

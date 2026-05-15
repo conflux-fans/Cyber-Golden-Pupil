@@ -60,6 +60,15 @@ program
     "write the full-run report to <path>; format is inferred from the extension (.html | .json), default: ./<project>-<provider>-<model>.html",
   )
   .option("--no-report", "do not write a report file")
+  .option(
+    "--cache-dir <dir>",
+    "directory to store resumable scan cache (per provider+model+project)",
+    "./.ai-bug-scanner-cache",
+  )
+  .option(
+    "--no-resume",
+    "ignore any existing cache and re-run every chunk (also disables writing the cache)",
+  )
   .option("--dry-run", "skip LLM calls; print prefilter results only", false)
   .action(scan);
 

@@ -8,14 +8,23 @@ import {
   buildJudgePrompt,
   decideFromJudge,
   safeParseJudge,
+  type JudgeDecision,
 } from "./judge.js";
 import { withRetry } from "../utils/retry.js";
+import {
+  type ScanCache,
+  chunkCacheKey,
+  findingCacheKey,
+} from "./cache.js";
 
 interface RunOpts {
   concurrency: number;
   maxRetries?: number;
   /** Run an LLM-as-judge second pass on critical findings. Default: true. */
   judge?: boolean;
+  /** Optional resumable cache. When provided, completed chunks/judgements are
+   *  persisted as they finish and re-used on subsequent runs. */
+  cache?: ScanCache;
   onProgress?: (completed: number, total: number) => void;
   onJudgeStart?: (count: number) => void;
   onJudgeProgress?: (completed: number, total: number) => void;
@@ -28,6 +37,10 @@ export interface RunStats {
   analyzeCalls: number;
   /** Successful judge-pass LLM calls (one per critical finding the judge reviewed). */
   judgeCalls: number;
+  /** Chunks served from cache instead of issuing an LLM call (subset of analyzeCalls). */
+  chunkCacheHits: number;
+  /** Judgements served from cache instead of issuing an LLM call (subset of judgeCalls). */
+  judgeCacheHits: number;
 }
 
 export interface RunResult {
@@ -59,6 +72,8 @@ export async function analyze(
     outputTokens: 0,
     analyzeCalls: 0,
     judgeCalls: 0,
+    chunkCacheHits: 0,
+    judgeCacheHits: 0,
   };
 
   const shrink = (reason: string): void => {
@@ -84,9 +99,13 @@ export async function analyze(
     }
   };
 
-  // Wraps a single LLM call with retry + shared throttle state. Both the
-  // analyze pass and the judge pass go through this so a 429 triggered by
-  // either phase ripples through to the other.
+  // Single LLM call with retry + shared throttle state. Both passes go through
+  // this so a 429 in one phase ripples through to the other.
+  //
+  // Unlike the previous version, this does NOT update RunStats — the caller
+  // does, after deciding whether to also persist the result into the cache.
+  // That lets us record per-call token usage alongside cached chunks/judgements
+  // without double-counting.
   const complete = async (req: LLMRequest, label: string): Promise<LLMResponse> => {
     const res = await withRetry(() => client.complete(req), {
       maxRetries,
@@ -102,8 +121,6 @@ export async function analyze(
         }
       },
     });
-    stats.inputTokens += res.inputTokens ?? 0;
-    stats.outputTokens += res.outputTokens ?? 0;
     recordSuccess();
     return res;
   };
@@ -115,10 +132,34 @@ export async function analyze(
 
   const chunkTasks = chunks.map((chunk) =>
     limit(async () => {
-      try {
-        const out = await analyzeChunk(chunk, complete);
+      const key = chunkCacheKey(chunk);
+      const cached = opts.cache?.getChunk(key);
+      if (cached) {
+        stats.inputTokens += cached.inputTokens;
+        stats.outputTokens += cached.outputTokens;
         stats.analyzeCalls++;
-        return out;
+        stats.chunkCacheHits++;
+        analyzedCompleted++;
+        opts.onProgress?.(analyzedCompleted, totalChunks);
+        // Stamp crate (not stored to keep the cache stable across crate renames
+        // in workspace re-layouts; we re-derive from the chunk being requested).
+        return cached.findings.map((f) => ({ ...f, crate: chunk.file.crate }));
+      }
+      try {
+        const result = await analyzeChunk(chunk, complete);
+        stats.inputTokens += result.inputTokens;
+        stats.outputTokens += result.outputTokens;
+        stats.analyzeCalls++;
+        if (opts.cache) {
+          await opts.cache.putChunk({
+            chunkKey: key,
+            // Strip `crate` before persisting: it's metadata, not finding identity.
+            findings: result.findings.map(({ crate: _crate, ...rest }) => rest),
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+          });
+        }
+        return result.findings;
       } catch (e) {
         process.stderr.write(
           `[warn] chunk ${chunk.file.relPath}:${chunk.startLine} failed: ${String(e)}\n`,
@@ -191,10 +232,36 @@ async function runJudgePass(
   const drop = new Set<number>();
   const downgrade = new Map<number, Finding["severity"]>();
 
+  const applyDecision = (idx: number, decision: JudgeDecision, finding: Finding): void => {
+    if (decision.kind === "drop") {
+      drop.add(idx);
+      process.stderr.write(
+        `[judge] reject ${finding.rule_id} @ ${finding.file}:${finding.line_start} — ${decision.reason}\n`,
+      );
+    } else if (decision.kind === "downgrade") {
+      downgrade.set(idx, decision.newSeverity);
+      process.stderr.write(
+        `[judge] downgrade ${finding.rule_id} @ ${finding.file}:${finding.line_start} → ${decision.newSeverity} — ${decision.reason}\n`,
+      );
+    }
+  };
+
   const judgeTasks = criticalIdx.map((idx) =>
     limit(async () => {
       const finding = findings[idx];
       if (!finding) return;
+      const fkey = findingCacheKey(finding);
+      const cached = opts.cache?.getJudge(fkey);
+      if (cached) {
+        stats.inputTokens += cached.inputTokens;
+        stats.outputTokens += cached.outputTokens;
+        stats.judgeCalls++;
+        stats.judgeCacheHits++;
+        applyDecision(idx, cached.decision, finding);
+        judgedCompleted++;
+        opts.onJudgeProgress?.(judgedCompleted, criticalIdx.length);
+        return;
+      }
       try {
         const fileContent = fileContents.get(finding.file);
         if (!fileContent) {
@@ -211,21 +278,24 @@ async function runJudgePass(
           },
           `judge ${finding.file}:${finding.line_start}`,
         );
+        const inputTokens = res.inputTokens ?? 0;
+        const outputTokens = res.outputTokens ?? 0;
+        stats.inputTokens += inputTokens;
+        stats.outputTokens += outputTokens;
         stats.judgeCalls++;
         const parsed = safeParseJudge(res.text);
-        if (!parsed) return; // unparseable → keep finding
-        const decision = decideFromJudge(finding, parsed);
-        if (decision.kind === "drop") {
-          drop.add(idx);
-          process.stderr.write(
-            `[judge] reject ${finding.rule_id} @ ${finding.file}:${finding.line_start} — ${decision.reason}\n`,
-          );
-        } else if (decision.kind === "downgrade") {
-          downgrade.set(idx, decision.newSeverity);
-          process.stderr.write(
-            `[judge] downgrade ${finding.rule_id} @ ${finding.file}:${finding.line_start} → ${decision.newSeverity} — ${decision.reason}\n`,
-          );
+        const decision: JudgeDecision = parsed
+          ? decideFromJudge(finding, parsed)
+          : { kind: "keep" };
+        if (opts.cache) {
+          await opts.cache.putJudge({
+            findingKey: fkey,
+            decision,
+            inputTokens,
+            outputTokens,
+          });
         }
+        applyDecision(idx, decision, finding);
       } catch (e) {
         process.stderr.write(
           `[warn] judge failed for ${finding.file}:${finding.line_start}: ${String(e)}\n`,
@@ -249,10 +319,16 @@ async function runJudgePass(
   return out;
 }
 
+interface ChunkResult {
+  findings: Finding[];
+  inputTokens: number;
+  outputTokens: number;
+}
+
 async function analyzeChunk(
   chunk: Chunk,
   complete: (req: LLMRequest, label: string) => Promise<LLMResponse>,
-): Promise<Finding[]> {
+): Promise<ChunkResult> {
   const res = await complete(
     {
       systemPrompt: SYSTEM_PROMPT,
@@ -263,10 +339,16 @@ async function analyzeChunk(
     `${chunk.file.relPath}:${chunk.startLine}`,
   );
   const parsed = safeParse(res.text);
-  if (!parsed) return [];
-  return parsed.findings
-    .filter((f) => isEvidenceInChunk(f.evidence, chunk.content))
-    .map((f) => ({ ...f, crate: chunk.file.crate }));
+  const findings: Finding[] = parsed
+    ? parsed.findings
+        .filter((f) => isEvidenceInChunk(f.evidence, chunk.content))
+        .map((f) => ({ ...f, crate: chunk.file.crate }))
+    : [];
+  return {
+    findings,
+    inputTokens: res.inputTokens ?? 0,
+    outputTokens: res.outputTokens ?? 0,
+  };
 }
 
 function safeParse(text: string): { findings: Finding[] } | null {
