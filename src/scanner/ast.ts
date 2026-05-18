@@ -1,6 +1,7 @@
 import Parser from "tree-sitter";
 import Rust from "tree-sitter-rust";
-import type { Chunk, SourceFile } from "../types.js";
+import type { Chunk, ScanMode, SourceFile } from "../types.js";
+import { getRules } from "./rules.js";
 
 /**
  * AST-driven function-level chunking using tree-sitter-rust.
@@ -32,27 +33,6 @@ function getParser(): Parser {
   return parser;
 }
 
-interface Rule {
-  hint: string;
-  re: RegExp;
-}
-
-// Keep this list in sync with prefilter.ts. The two modules share gating logic
-// but apply it at different granularities (windows vs. AST function bodies).
-const RULES: Rule[] = [
-  { hint: "unsafe", re: /\bunsafe\b/ },
-  { hint: "ffi", re: /\bextern\s+"C"|#\[no_mangle\]/ },
-  { hint: "panic", re: /\.unwrap\(\)|\.expect\(/ },
-  { hint: "cast", re: /\bas\s+(u|i)(8|16|32|64|size)\b/ },
-  { hint: "process", re: /std::process::Command|Command::new/ },
-  { hint: "fs", re: /std::fs::|tokio::fs::/ },
-  { hint: "net", re: /reqwest::|hyper::|tokio::net::/ },
-  { hint: "sql", re: /sqlx::|diesel::|rusqlite::/ },
-  { hint: "crypto", re: /\bmd5\b|\bsha1\b|rand::random|ring::|openssl::/ },
-  { hint: "deser", re: /serde_json::from_|bincode::deserialize|rmp_serde::|toml::from_/ },
-  { hint: "transmute", re: /std::mem::transmute|mem::transmute/ },
-];
-
 const FUNCTION_NODE_TYPES = new Set([
   "function_item",
   // Trait method signatures and `extern "C" { fn ... }` declarations. These
@@ -76,7 +56,7 @@ interface ExtractedFn {
  * Try AST-based chunking for a single file. Returns null if parsing fails so
  * the caller can fall back to regex-window chunking.
  */
-export function chunkFileByAst(file: SourceFile): Chunk[] | null {
+export function chunkFileByAst(file: SourceFile, mode: ScanMode = "safety"): Chunk[] | null {
   let tree: Parser.Tree;
   try {
     tree = getParser().parse(file.content);
@@ -93,6 +73,7 @@ export function chunkFileByAst(file: SourceFile): Chunk[] | null {
   // We grab leading `use` items at the top of the source_file node.
   const useLines = collectTopLevelUses(tree.rootNode, lines);
 
+  const rules = getRules(mode);
   const chunks: Chunk[] = [];
   for (const fn of fns) {
     const startIdx = fn.startLine - 1;
@@ -101,7 +82,7 @@ export function chunkFileByAst(file: SourceFile): Chunk[] | null {
 
     // Gate: regex hint rules over the function body itself.
     const hintSet = new Set<string>();
-    for (const r of RULES) {
+    for (const r of rules) {
       if (r.re.test(body)) hintSet.add(r.hint);
     }
     if (hintSet.size === 0) continue;

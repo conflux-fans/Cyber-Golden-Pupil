@@ -7,6 +7,7 @@ import { loadProject } from "../scanner/project.js";
 import { walkCrates } from "../scanner/walker.js";
 import { prefilter, type ChunkingUnit } from "../scanner/prefilter.js";
 import { analyze } from "../analyzer/runner.js";
+import type { ScanMode } from "../types.js";
 import { renderTerminal } from "../reporter/terminal.js";
 import { renderJson } from "../reporter/json.js";
 import { buildReport, countLines, defaultReportFilename } from "../reporter/report.js";
@@ -24,6 +25,7 @@ interface ScanOptions {
   dryRun: boolean;
   crate: string[];
   unit: ChunkingUnit;
+  mode: ScanMode;
   report?: string | false;
   cacheDir: string;
   /** Commander's `--no-resume` produces `resume: false`; default is `true`. */
@@ -65,10 +67,10 @@ export async function scan(dir: string, opts: ScanOptions): Promise<void> {
     return;
   }
 
-  spin.start(`Pre-filtering risky regions (unit=${opts.unit})...`);
-  const chunks = prefilter(files, opts.unit);
+  spin.start(`Pre-filtering risky regions (mode=${opts.mode}, unit=${opts.unit})...`);
+  const chunks = prefilter(files, opts.unit, opts.mode);
   spin.succeed(
-    `Pre-filter produced ${chalk.cyan(chunks.length)} candidate chunk(s) (unit=${opts.unit})`,
+    `Pre-filter produced ${chalk.cyan(chunks.length)} candidate chunk(s) (mode=${opts.mode}, unit=${opts.unit})`,
   );
 
   if (opts.dryRun) {
@@ -107,6 +109,7 @@ export async function scan(dir: string, opts: ScanOptions): Promise<void> {
       provider: cfg.providerName,
       model: cfg.model,
       unit: opts.unit,
+      mode: opts.mode,
       judge: opts.judge,
       crates: crates.map((c) => c.name),
     };
@@ -135,6 +138,7 @@ export async function scan(dir: string, opts: ScanOptions): Promise<void> {
       concurrency: opts.concurrency,
       maxRetries: opts.maxRetries,
       judge: opts.judge,
+      mode: opts.mode,
       cache,
       onProgress: (done, total) => {
         spin.text = formatProgress(label, done, total);
@@ -187,6 +191,7 @@ export async function scan(dir: string, opts: ScanOptions): Promise<void> {
       },
       config: {
         unit: opts.unit,
+        mode: opts.mode,
         concurrency: opts.concurrency,
         maxRetries: opts.maxRetries,
         judge: opts.judge,

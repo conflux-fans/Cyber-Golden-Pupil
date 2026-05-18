@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { scan } from "./commands/scan.js";
 import { evaluate } from "./commands/evaluate.js";
 import { listProviders } from "./config/index.js";
+import { SCAN_MODES, type ScanMode } from "./types.js";
 
 dotenv.config();
 
@@ -37,6 +38,19 @@ program
     "limit scan to specific crate(s); pass multiple times to scan several",
     (v: string, prev: string[]) => [...prev, v],
     [] as string[],
+  )
+  .option(
+    "--mode <mode>",
+    `scan focus: ${SCAN_MODES.join(" | ")} — safety = memory safety / casts / injection / crypto; logic = logic bugs, DoS, concurrency design, implementation defects; panic = every reachable crash path (unwrap on runtime-fallible values, OOB index/slice, divide-by-zero, lock poisoning, Drop / FFI panics, stack overflow)`,
+    (v: string): ScanMode => {
+      if (!(SCAN_MODES as readonly string[]).includes(v)) {
+        throw new Error(
+          `Invalid --mode: ${v}. Expected one of: ${SCAN_MODES.join(", ")}.`,
+        );
+      }
+      return v as ScanMode;
+    },
+    "safety" as ScanMode,
   )
   .option(
     "--unit <unit>",

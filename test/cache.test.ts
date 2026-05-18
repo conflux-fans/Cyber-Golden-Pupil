@@ -49,6 +49,7 @@ function makeKey(over: Partial<ScanCacheKey> = {}): ScanCacheKey {
     provider: "kimi",
     model: "kimi-k2.6",
     unit: "ast-function",
+    mode: "safety",
     judge: true,
     crates: ["demo"],
     ...over,

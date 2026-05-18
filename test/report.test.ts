@@ -77,7 +77,7 @@ test("buildReport: produces valid JSON with all expected sections", () => {
       baseUrl: "https://api.moonshot.cn/v1",
       protocol: "openai",
     },
-    config: { unit: "ast-function", concurrency: 4, maxRetries: 5, judge: true },
+    config: { unit: "ast-function", mode: "safety", concurrency: 4, maxRetries: 5, judge: true },
     stats: {
       inputTokens: 100,
       outputTokens: 50,

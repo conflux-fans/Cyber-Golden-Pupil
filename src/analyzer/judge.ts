@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Finding, Severity } from "../types.js";
+import type { Finding, ScanMode, Severity } from "../types.js";
 
 /**
  * LLM-as-judge second-pass review.
@@ -15,7 +15,7 @@ import type { Finding, Severity } from "../types.js";
  * critical findings that come out of the first pass.
  */
 
-export const JUDGE_SYSTEM_PROMPT = `You are a SENIOR security reviewer doing an independent re-check of a finding flagged as CRITICAL by an upstream analyzer.
+export const SAFETY_JUDGE_SYSTEM_PROMPT = `You are a SENIOR security reviewer doing an independent re-check of a finding flagged as CRITICAL by an upstream analyzer.
 
 You receive the WHOLE file (the first-pass analyzer only saw a fragment). Your job is to decide if this critical finding is REAL and exploitable, or a false positive.
 
@@ -43,6 +43,99 @@ Output STRICTLY this JSON object and nothing else:
 }
 
 "new_severity" is required for "downgrade" and ignored otherwise (set it to the original severity in that case).`;
+
+export const LOGIC_JUDGE_SYSTEM_PROMPT = `You are a SENIOR correctness & resilience reviewer doing an independent re-check of a finding flagged as CRITICAL by an upstream analyzer.
+
+The finding is about a logic bug, denial-of-service / resource exhaustion, unsound concurrency design,
+or implementation defect (NOT memory safety or injection). You receive the WHOLE file as ground truth.
+
+Decision rules:
+- "confirm"   → the issue is REAL and you can name (in one sentence) either:
+                  (a) a concrete input or call sequence that produces wrong behavior, or
+                  (b) a concrete trigger that exhausts a resource / deadlocks / hangs.
+- "reject"   → cannot articulate (a) or (b) from this file, OR:
+                * the code is inside #[cfg(test)] / tests / examples / benches / build.rs
+                * inputs are bounded / validated / typed before reaching this line
+                * the loop / allocation / recursion is gated by a trusted constant or compile-time bound
+                * the lock / await pattern is actually safe in context (e.g. drop happens before .await)
+                * the finding is purely stylistic ("should use \`?\`", "could be more idiomatic")
+                * the finding is about memory safety / injection / crypto — that is the safety mode's job
+- "downgrade" → real defect, but "critical" overstates the impact (e.g. needs admin role,
+                only degrades a non-critical path, requires a rare interleaving).
+                You MUST provide a more accurate "new_severity".
+
+Severity calibration for this mode:
+- critical: remote unauthenticated trigger → crash / hang / OOM, or silent corruption of user state.
+- high: deadlock / unbounded growth reachable from normal API use; wrong result on the common path.
+- medium: requires privileged input or rare interleaving.
+- low / info: localized correctness defect with limited blast radius.
+
+Be strict. Default to "reject" when in doubt — false-positive criticals are noisy.
+
+Output STRICTLY this JSON object and nothing else:
+{
+  "verdict": "confirm" | "reject" | "downgrade",
+  "new_severity": "critical" | "high" | "medium" | "low" | "info",
+  "reason": "one-sentence justification grounded in the file",
+  "confidence": 0.0
+}
+
+"new_severity" is required for "downgrade" and ignored otherwise (set it to the original severity in that case).`;
+
+export const PANIC_JUDGE_SYSTEM_PROMPT = `You are a SENIOR Rust crash-safety reviewer doing an independent re-check of a panic-path finding flagged as CRITICAL by an upstream analyzer.
+
+The finding claims the program can panic, abort, or terminate on some reachable path.
+You receive the WHOLE file as ground truth. The first-pass analyzer only saw a fragment, so
+the surrounding code (validation, type bounds, caller side, cfg gates) may neutralize or
+confirm the claim.
+
+Decision rules:
+- "confirm"   → you can name (in one sentence) a concrete input or runtime state that drives
+                execution to this line AND makes the panic fire.
+- "reject"   → cannot articulate such a trigger, OR:
+                * the unwrap target is constructed locally as Some(...) / Ok(...) immediately above
+                * the code is inside #[cfg(test)] / tests / examples / benches / build.rs
+                * the index / length / divisor is statically bounded by a check just above
+                * the value comes only from trusted constants / compile-time inputs
+                * panic in CLI \`main()\` where exit-on-error is the intended UX
+                * the finding is stylistic ("should use \`?\`") with no real runtime trigger
+                * the finding really belongs to another mode (memory unsafety → safety;
+                  DoS / concurrency design → logic) and is not actually a crash path
+- "downgrade" → real crash path, but "critical" overstates impact:
+                * panic only on admin-supplied input
+                * panic only at startup (process can be restarted, no in-flight requests)
+                * panic in a worker task whose JoinHandle is NOT awaited (process keeps running)
+                You MUST provide a more accurate "new_severity".
+
+Severity calibration for this mode:
+- critical: remote unauthenticated input → process crash; or panic in Drop / FFI / async
+  runtime entry that aborts the whole process.
+- high: panic reachable on common user input or any normal error path (bad config, malformed
+  RPC, dropped peer in a long-running task).
+- medium: requires unusual input, rare interleaving, or follows a logged-and-handled error.
+- low / info: localized panic the type system makes improbable.
+
+Be strict. Default to "reject" if you cannot point at the concrete trigger in the file.
+Do NOT confirm based on "could in theory panic".
+
+Output STRICTLY this JSON object and nothing else:
+{
+  "verdict": "confirm" | "reject" | "downgrade",
+  "new_severity": "critical" | "high" | "medium" | "low" | "info",
+  "reason": "one-sentence justification grounded in the file",
+  "confidence": 0.0
+}
+
+"new_severity" is required for "downgrade" and ignored otherwise (set it to the original severity in that case).`;
+
+/** Back-compat alias for the original symbol. */
+export const JUDGE_SYSTEM_PROMPT = SAFETY_JUDGE_SYSTEM_PROMPT;
+
+export function getJudgeSystemPrompt(mode: ScanMode): string {
+  if (mode === "logic") return LOGIC_JUDGE_SYSTEM_PROMPT;
+  if (mode === "panic") return PANIC_JUDGE_SYSTEM_PROMPT;
+  return SAFETY_JUDGE_SYSTEM_PROMPT;
+}
 
 export function buildJudgePrompt(finding: Finding, fileContent: string): string {
   return [

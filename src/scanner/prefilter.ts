@@ -1,37 +1,21 @@
-import type { Chunk, SourceFile } from "../types.js";
+import type { Chunk, ScanMode, SourceFile } from "../types.js";
 import { chunkFileByAst } from "./ast.js";
+import { getRules, type Rule } from "./rules.js";
 
 export type ChunkingUnit = "function" | "file" | "ast-function";
-
-interface Rule {
-  hint: string;
-  re: RegExp;
-}
-
-// Risk-hint rules. The windowed and AST strategies share this gating signal —
-// `ast-function` enforces it at function-body granularity (true AST chunks),
-// while `function` falls back to a regex-driven sliding window.
-const RULES: Rule[] = [
-  { hint: "unsafe", re: /\bunsafe\b/ },
-  { hint: "ffi", re: /\bextern\s+"C"|#\[no_mangle\]/ },
-  { hint: "panic", re: /\.unwrap\(\)|\.expect\(/ },
-  { hint: "cast", re: /\bas\s+(u|i)(8|16|32|64|size)\b/ },
-  { hint: "process", re: /std::process::Command|Command::new/ },
-  { hint: "fs", re: /std::fs::|tokio::fs::/ },
-  { hint: "net", re: /reqwest::|hyper::|tokio::net::/ },
-  { hint: "sql", re: /sqlx::|diesel::|rusqlite::/ },
-  { hint: "crypto", re: /\bmd5\b|\bsha1\b|rand::random|ring::|openssl::/ },
-  { hint: "deser", re: /serde_json::from_|bincode::deserialize|rmp_serde::|toml::from_/ },
-  { hint: "transmute", re: /std::mem::transmute|mem::transmute/ },
-];
 
 const CONTEXT_BEFORE = 10;
 const WINDOW_AFTER = 80;
 
-export function prefilter(files: SourceFile[], unit: ChunkingUnit = "function"): Chunk[] {
-  if (unit === "file") return prefilterByFile(files);
-  if (unit === "ast-function") return prefilterByAst(files);
-  return prefilterByWindow(files);
+export function prefilter(
+  files: SourceFile[],
+  unit: ChunkingUnit = "function",
+  mode: ScanMode = "safety",
+): Chunk[] {
+  const rules = getRules(mode);
+  if (unit === "file") return prefilterByFile(files, rules);
+  if (unit === "ast-function") return prefilterByAst(files, rules, mode);
+  return prefilterByWindow(files, rules);
 }
 
 /**
@@ -39,13 +23,13 @@ export function prefilter(files: SourceFile[], unit: ChunkingUnit = "function"):
  * per-file basis when tree-sitter cannot parse the file (e.g. malformed source
  * or future Rust syntax the bundled grammar does not yet support).
  */
-function prefilterByAst(files: SourceFile[]): Chunk[] {
+function prefilterByAst(files: SourceFile[], rules: Rule[], mode: ScanMode): Chunk[] {
   const chunks: Chunk[] = [];
   for (const file of files) {
-    const astChunks = chunkFileByAst(file);
+    const astChunks = chunkFileByAst(file, mode);
     if (astChunks === null) {
       // Parser failure → keep the file safe, fall back to windowed mode.
-      chunks.push(...prefilterByWindow([file]));
+      chunks.push(...prefilterByWindow([file], rules));
       continue;
     }
     chunks.push(...astChunks);
@@ -54,13 +38,13 @@ function prefilterByAst(files: SourceFile[]): Chunk[] {
 }
 
 /** One chunk per file that has at least one rule hit, covering the whole file. */
-function prefilterByFile(files: SourceFile[]): Chunk[] {
+function prefilterByFile(files: SourceFile[], rules: Rule[]): Chunk[] {
   const chunks: Chunk[] = [];
   for (const file of files) {
     const hintSet = new Set<string>();
     const lines = file.content.split("\n");
     for (const line of lines) {
-      for (const r of RULES) {
+      for (const r of rules) {
         if (r.re.test(line)) hintSet.add(r.hint);
       }
     }
@@ -77,13 +61,13 @@ function prefilterByFile(files: SourceFile[]): Chunk[] {
 }
 
 /** Windowed chunks around each rule hit. Adjacent windows are merged. */
-function prefilterByWindow(files: SourceFile[]): Chunk[] {
+function prefilterByWindow(files: SourceFile[], rules: Rule[]): Chunk[] {
   const chunks: Chunk[] = [];
   for (const file of files) {
     const lines = file.content.split("\n");
     const hits = new Map<number, Set<string>>();
     lines.forEach((line, i) => {
-      for (const r of RULES) {
+      for (const r of rules) {
         if (r.re.test(line)) {
           let set = hits.get(i);
           if (!set) {

@@ -1,10 +1,10 @@
 import pLimit from "p-limit";
-import type { Chunk, Finding, Severity } from "../types.js";
+import type { Chunk, Finding, ScanMode, Severity } from "../types.js";
 import type { LLMClient, LLMRequest, LLMResponse } from "../providers/base.js";
-import { SYSTEM_PROMPT, buildUserPrompt } from "./prompts.js";
+import { getSystemPrompt, buildUserPrompt } from "./prompts.js";
 import { AnalysisResponseSchema } from "./schema.js";
 import {
-  JUDGE_SYSTEM_PROMPT,
+  getJudgeSystemPrompt,
   buildJudgePrompt,
   decideFromJudge,
   safeParseJudge,
@@ -22,6 +22,8 @@ interface RunOpts {
   maxRetries?: number;
   /** Run an LLM-as-judge second pass on critical findings. Default: true. */
   judge?: boolean;
+  /** Which prompt set drives both passes. Default: "safety". */
+  mode?: ScanMode;
   /** Optional resumable cache. When provided, completed chunks/judgements are
    *  persisted as they finish and re-used on subsequent runs. */
   cache?: ScanCache;
@@ -66,6 +68,9 @@ export async function analyze(
   const limit = pLimit(opts.concurrency);
   const initialConcurrency = opts.concurrency;
   const maxRetries = opts.maxRetries ?? 5;
+  const mode: ScanMode = opts.mode ?? "safety";
+  const systemPrompt = getSystemPrompt(mode);
+  const judgeSystemPrompt = getJudgeSystemPrompt(mode);
   let successesSinceShrink = 0;
   const stats: RunStats = {
     inputTokens: 0,
@@ -146,7 +151,7 @@ export async function analyze(
         return cached.findings.map((f) => ({ ...f, crate: chunk.file.crate }));
       }
       try {
-        const result = await analyzeChunk(chunk, complete);
+        const result = await analyzeChunk(chunk, complete, systemPrompt);
         stats.inputTokens += result.inputTokens;
         stats.outputTokens += result.outputTokens;
         stats.analyzeCalls++;
@@ -175,7 +180,15 @@ export async function analyze(
 
   // --- Pass 2: judge critical findings ---
   if (opts.judge !== false) {
-    findings = await runJudgePass(findings, chunks, complete, limit, opts, stats);
+    findings = await runJudgePass(
+      findings,
+      chunks,
+      complete,
+      limit,
+      opts,
+      stats,
+      judgeSystemPrompt,
+    );
   }
 
   // Sort highest severity first so every downstream consumer (terminal, JSON,
@@ -213,6 +226,7 @@ async function runJudgePass(
   limit: ReturnType<typeof pLimit>,
   opts: RunOpts,
   stats: RunStats,
+  judgeSystemPrompt: string,
 ): Promise<Finding[]> {
   const criticalIdx: number[] = [];
   findings.forEach((f, i) => {
@@ -271,7 +285,7 @@ async function runJudgePass(
         }
         const res = await complete(
           {
-            systemPrompt: JUDGE_SYSTEM_PROMPT,
+            systemPrompt: judgeSystemPrompt,
             userPrompt: buildJudgePrompt(finding, fileContent),
             temperature: 0.1,
             maxTokens: 1024,
@@ -328,10 +342,11 @@ interface ChunkResult {
 async function analyzeChunk(
   chunk: Chunk,
   complete: (req: LLMRequest, label: string) => Promise<LLMResponse>,
+  systemPrompt: string,
 ): Promise<ChunkResult> {
   const res = await complete(
     {
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       userPrompt: buildUserPrompt(chunk),
       temperature: 0.1,
       maxTokens: 2048,

@@ -26,6 +26,7 @@ export function renderHtmlReport(args: ReportArgs): string {
     ["Provider / model", `<code>${esc(args.provider.name)} / ${esc(args.provider.model)}</code>`],
     ["API base URL", `<code>${esc(args.provider.baseUrl)}</code>`],
     ["Protocol", esc(args.provider.protocol)],
+    ["Scan mode", esc(args.config.mode)],
     ["Chunking unit", esc(args.config.unit)],
     ["Concurrency", String(args.config.concurrency)],
     ["Max retries", String(args.config.maxRetries)],

@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Scan modes.** New `--mode <safety|logic|panic>` flag selects the focus of
+  the scan.
+  - `safety` (default) is the original behavior — memory safety, unchecked
+    casts, FFI, injection, crypto misuse.
+  - `logic` targets correctness and availability defects: logic bugs
+    (off-by-one, wrong comparisons, error-swallowing, state-machine mistakes),
+    denial-of-service / resource exhaustion (unbounded loops, alloc sized by
+    untrusted input, unbounded reads, missing timeouts, catastrophic regex),
+    unsound concurrency design (locks held across `.await`, blocking calls
+    inside async, atomic ordering misuse, dropped JoinHandles, channel
+    back-pressure), and other implementation vulnerabilities (TOCTOU, broken
+    invariants, non-deterministic iteration in consensus paths).
+  - `panic` targets every reachable crash path: explicit panics, `unwrap` /
+    `expect` on values that can be `Err`/`None` at runtime (parse, env var,
+    lock poisoning, dropped channel peer), indexing / slicing OOB, division
+    or modulo by zero, debug-mode overflow, `RefCell` borrow conflicts, `Mutex`
+    poisoning, channel send/recv unwraps, stack overflow from unbounded
+    recursion, panics inside `Drop`, and panics propagating across an
+    `extern "C"` boundary.
+  - Each mode has its own prefilter rule set, first-pass system prompt, and
+    judge system prompt — so changing `--mode` swaps the entire reasoning
+    pipeline, not just the prompt text.
+  - `mode` is part of the cache key, so scans in different modes against the
+    same project do not pollute each other's resumable cache.
+  - The scan mode is recorded in the JSON/HTML report.
+
 - **Resumable scans.** Each completed chunk and judge call is appended to a
   JSONL cache as it finishes, so a scan interrupted by `Ctrl-C`, a crash, or a
   network drop can be continued on the next run without re-spending tokens on

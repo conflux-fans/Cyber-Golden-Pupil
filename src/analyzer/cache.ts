@@ -12,6 +12,9 @@ export interface ScanCacheKey {
   provider: string;
   model: string;
   unit: string;
+  /** Scan mode ("safety" | "logic"). Different modes use different prompts, so
+   *  their cached findings are not interchangeable. */
+  mode: string;
   judge: boolean;
   crates: string[];
 }
@@ -36,6 +39,7 @@ interface MetaRecord {
   provider: string;
   model: string;
   unit: string;
+  mode: string;
   judge: boolean;
   projectPath: string;
   crates: string[];
@@ -128,6 +132,7 @@ export class ScanCache {
         provider: key.provider,
         model: key.model,
         unit: key.unit,
+        mode: key.mode,
         judge: key.judge,
         projectPath: key.projectPath,
         crates: [...key.crates].sort(),

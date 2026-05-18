@@ -28,6 +28,7 @@ export interface ReportArgs {
   };
   config: {
     unit: string;
+    mode: string;
     concurrency: number;
     maxRetries: number;
     judge: boolean;
